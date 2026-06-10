@@ -1,0 +1,14 @@
+# Build output
+bin/
+obj/
+
+# IDE / user-specific
+.vs/
+*.user
+*.suo
+
+# Local environment (real values never committed)
+.env
+
+# Local compose overrides
+docker-compose.override.yml
