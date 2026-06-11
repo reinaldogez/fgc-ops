@@ -1,0 +1,28 @@
+# Template do override de chave RSA — apenas placeholder, versionado.
+#
+# Uso:
+#   1. copie este arquivo para docker-compose.override.yml (nao-versionado);
+#   2. gere uma chave com scripts/gen-rsa-key.sh;
+#   3. cole o PEM PKCS#8 real no block scalar abaixo, em UM unico lugar — a ancora
+#      injeta a mesma chave nos dois servicos.
+#
+# O override real e carregado automaticamente pelo compose junto do docker-compose.yml.
+# Tanto identity-migrate quanto identity-api compoem o mesmo host e a validacao fail-fast
+# da chave de assinatura roda antes do ramo --migrate; por isso os dois precisam do PEM.
+# A chave privada multilinha vive aqui (block scalar `|`), nao no .env — um PEM quebra o
+# parsing do .env. Este .example carrega so placeholder; o override real nunca e versionado.
+
+x-identity-jwt: &identity-jwt
+  Jwt__RsaPrivateKeyPem: |
+    -----BEGIN PRIVATE KEY-----
+    REPLACE_ME
+    -----END PRIVATE KEY-----
+  Jwt__KeyId: fcg-identity-key-1
+
+services:
+  identity-migrate:
+    environment:
+      <<: *identity-jwt
+  identity-api:
+    environment:
+      <<: *identity-jwt
