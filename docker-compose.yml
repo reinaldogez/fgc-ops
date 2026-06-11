@@ -32,6 +32,94 @@ services:
     volumes:
       - "rabbitmq-data:/var/lib/rabbitmq"
 
+  # ---------- observabilidade (LGTM + OTel Collector) ----------
+  # Telemetria descartavel: sem volumes nomeados, fs efemero do container.
+  # Enderecos sempre por nome de servico na rede interna do compose.
+
+  # Recebe OTLP gRPC :4317 dos servicos; roteia traces->Tempo e expoe metricas em :8889.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - "./observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml"
+    # 4317 (OTLP gRPC) e 8889 (Prometheus exporter) ficam so na rede interna.
+
+  # Logs: recebe push direto do sink Serilog do identity em :3100.
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - "./observability/loki/loki.yaml:/etc/loki/loki.yaml"
+
+  # Traces: recebe OTLP gRPC :4317 do collector; serve lookup ao Grafana em :3200.
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - "./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml"
+
+  # Metricas: faz scrape (pull) do exporter do collector; API em :9090.
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - "./observability/prometheus:/etc/prometheus"
+
+  # UI de observabilidade; datasources Loki/Tempo/Prometheus provisionados no boot.
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"   # UI exposta localmente
+    volumes:
+      - "./observability/grafana/provisioning:/etc/grafana/provisioning"
+
+  # ---------- orquestracao do identity ----------
+  # build+image no mesmo bloco: `up --build` constroi de ../fcg-identity e tagueia como
+  # image; `up` (sem flag) puxa a image publicada do GHCR. O secret gh_token so e usado no
+  # modo --build (restore autenticado do feed NuGet); o modo pull-GHCR nao o consome.
+
+  # One-shot: aplica as migrations e encerra (nao sobe host) antes da API subir.
+  # A validacao fail-fast da chave de assinatura roda no composition root, antes do ramo
+  # --migrate, entao este servico tambem recebe a chave RSA via override local.
+  identity-migrate:
+    build:
+      context: ../fcg-identity
+      secrets: [gh_token]
+    image: ghcr.io/reinaldogez/fcg-identity:latest
+    command: ["dotnet", "Fcg.Identity.Api.dll", "--migrate"]
+    restart: "no"
+    depends_on:
+      sqlserver-identity: { condition: service_healthy }
+    environment:
+      ConnectionStrings__DefaultConnection: ${IDENTITY_DB_CONNECTION}
+
+  # API: sobe so depois do banco e do broker healthy e da migration concluida com sucesso.
+  # A chave RSA de assinatura (Jwt__RsaPrivateKeyPem/Jwt__KeyId) vem do override local
+  # (a mesma chave injetada no identity-migrate).
+  identity-api:
+    build:
+      context: ../fcg-identity
+      secrets: [gh_token]
+    image: ghcr.io/reinaldogez/fcg-identity:latest
+    ports:
+      - "8081:8080"   # host 8081 -> container 8080
+    depends_on:
+      sqlserver-identity: { condition: service_healthy }
+      rabbitmq:           { condition: service_healthy }
+      identity-migrate:   { condition: service_completed_successfully }
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: ${IDENTITY_DB_CONNECTION}
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: "5672"
+      RabbitMq__Username: ${RABBITMQ_USER}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+      Jwt__Issuer: fcg-identity
+      Jwt__Audience: fcg
+      AdminSeed__DefaultPassword: ${ADMINSEED_PASSWORD}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      Loki__Url: http://loki:3100
+
   # ---------- infraestrutura de dados das proximas levas (placeholders, ainda inativos) ----------
   # Descomentar quando catalog/payments/notifications entrarem.
   # postgres-catalog:
@@ -74,3 +162,10 @@ services:
 volumes:
   sqlserver-identity-data:
   rabbitmq-data:
+
+# Ponteiro do secret de build: o PAT vem da env var GH_TOKEN exportada no shell no momento
+# do `up --build`. So o ponteiro e versionado; o valor nunca entra no repositorio. O id
+# gh_token casa com o secret mount esperado pelo build do identity.
+secrets:
+  gh_token:
+    environment: "GH_TOKEN"
