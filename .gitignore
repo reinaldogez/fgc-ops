@@ -12,3 +12,6 @@ obj/
 
 # Local compose overrides
 docker-compose.override.yml
+
+# RSA demo keys (real key material never committed)
+*.pem
