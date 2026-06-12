@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sqlserver-identity
+  namespace: fcg
+spec:
+  serviceName: sqlserver-identity
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sqlserver-identity
+  template:
+    metadata:
+      labels:
+        app: sqlserver-identity
+    spec:
+      containers:
+        - name: sqlserver
+          image: mcr.microsoft.com/mssql/server:2022-latest
+          ports:
+            - containerPort: 1433
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+          envFrom:
+            - secretRef:
+                name: sqlserver-identity-secret
+          volumeMounts:
+            - name: data
+              mountPath: /var/opt/mssql
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
