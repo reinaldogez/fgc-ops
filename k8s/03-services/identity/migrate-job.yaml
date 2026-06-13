@@ -21,3 +21,5 @@ spec:
                 name: identity-config
             - secretRef:
                 name: identity-secret
+            - secretRef:
+                name: identity-jwt
