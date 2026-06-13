@@ -15,3 +15,7 @@ docker-compose.override.yml
 
 # RSA demo keys (real key material never committed)
 *.pem
+
+# Kubernetes Secrets reais (copiados do .example, preenchidos fora do git)
+secret.yaml
+secret-jwt.yaml
